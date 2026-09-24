@@ -87,6 +87,9 @@ python3 main.py
 Beim Start wird kurz `git pull --ff-only` im eigenen Verzeichnis ausgeführt,
 damit immer die aktuelle Version läuft. Das blockiert den Start nie:
 
+- der Ablauf wird im Terminal mitgeschrieben (`Suche nach Updates ...`, das
+  ausgeführte git-Kommando und dessen Ausgabe), damit sichtbar ist, dass etwas
+  läuft – und ob ein Update kam
 - Timeout von 5 Sekunden – ohne Internet startet das Tool einfach weiter
 - git darf dabei nicht nach Zugangsdaten fragen (`GIT_TERMINAL_PROMPT=0`),
   sonst würde ein Prompt am Timeout vorbei hängen bleiben
@@ -94,7 +97,7 @@ damit immer die aktuelle Version läuft. Das blockiert den Start nie:
 - das Ergebnis erscheint als Hinweiszeile im Hauptmenü
 
 Abschalten mit `--no-update`; bei `--dry-run` unterbleibt es ohnehin, weil
-dabei nichts verändert wird:
+dabei nichts verändert wird. In beiden Fällen nennt das Tool den Grund:
 
 ```bash
 vpn-tui --no-update

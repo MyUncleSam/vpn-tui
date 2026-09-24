@@ -30,7 +30,10 @@ def main(argv: list[str] | None = None) -> int:
 
     notice = None
     # Im Dry-Run wird bewusst nichts verändert – auch nicht der eigene Checkout.
-    if not args.no_update and not args.dry_run:
+    if args.no_update or args.dry_run:
+        reason = "--no-update" if args.no_update else "--dry-run"
+        print(f"Update-Prüfung übersprungen ({reason}).")
+    else:
         from vpn_manager import updater
 
         notice = updater.update()

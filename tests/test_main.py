@@ -43,7 +43,7 @@ class StartupTests(unittest.TestCase):
 
         with mock.patch("importlib.util.find_spec", return_value=object()), mock.patch.dict(
             sys.modules, {"vpn_manager.tui.app": fake_app}
-        ):
+        ), contextlib.redirect_stdout(io.StringIO()):
             code = main(["--dry-run"])
 
         fake_app.run.assert_called_once_with(dry_run=True, notice=None)
@@ -60,25 +60,28 @@ class StartupTests(unittest.TestCase):
         up.assert_called_once_with()
         fake_app.run.assert_called_once_with(dry_run=False, notice="Neue Version eingespielt.")
 
-    def test_no_update_flag_skips_the_pull(self):
+    def _run_skipping_update(self, argv):
         fake_app = self._fake_app()
+        out = io.StringIO()
 
         with mock.patch("importlib.util.find_spec", return_value=object()), mock.patch.dict(
             sys.modules, {"vpn_manager.tui.app": fake_app}
-        ), mock.patch("vpn_manager.updater.update") as up:
-            main(["--no-update"])
+        ), mock.patch("vpn_manager.updater.update") as up, contextlib.redirect_stdout(out):
+            main(argv)
+
+        return up, out.getvalue()
+
+    def test_no_update_flag_skips_the_pull_and_says_so(self):
+        up, output = self._run_skipping_update(["--no-update"])
 
         up.assert_not_called()
+        self.assertIn("--no-update", output)
 
-    def test_dry_run_never_touches_the_checkout(self):
-        fake_app = self._fake_app()
-
-        with mock.patch("importlib.util.find_spec", return_value=object()), mock.patch.dict(
-            sys.modules, {"vpn_manager.tui.app": fake_app}
-        ), mock.patch("vpn_manager.updater.update") as up:
-            main(["--dry-run"])
+    def test_dry_run_never_touches_the_checkout_and_says_so(self):
+        up, output = self._run_skipping_update(["--dry-run"])
 
         up.assert_not_called()
+        self.assertIn("--dry-run", output)
 
 
 if __name__ == "__main__":
