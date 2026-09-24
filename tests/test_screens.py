@@ -64,14 +64,14 @@ class ImportScreenTests(ScreenTestCase):
             (Path(tmp.name) / filename).write_text("x")
         return tmp.name
 
-    def _fake_nmcli(self, stdout="", created=None):
+    def _fake_nmcli(self, stdout="", created=None, existing=None):
         """Simuliert nmcli: die Verbindungsliste wächst mit jedem erfolgreichen Import.
 
-        `stdout` ist die (ggf. übersetzte) Meldung des Imports – der Screen darf
-        sie nicht auswerten, die neue Verbindung wird über die UUID-Differenz
-        bestimmt.
+        `existing` sind bereits vorhandene Verbindungsnamen, `stdout` ist die
+        (ggf. übersetzte) Meldung des Imports – der Screen darf sie nicht
+        auswerten, die neue Verbindung wird über die UUID-Differenz bestimmt.
         """
-        state: dict[str, str] = {}
+        state: dict[str, str] = {f"uuid-{n}": n for n in (existing or [])}
         pending = list(created or [])
 
         def run(args, dry_run=False, **kwargs):
@@ -208,6 +208,90 @@ class ImportScreenTests(ScreenTestCase):
 
         commands = [call.args[0] for call in run_nmcli.call_args_list]
         self.assertIn(["connection", "modify", "a", "connection.autoconnect", "no"], commands)
+
+    def test_existing_connection_with_same_name_is_skipped(self):
+        from vpn_manager.tui import common, import_screen
+
+        folder = self._folder_with("test.ovpn")
+
+        with mock.patch.object(common, "prompt_text", return_value=folder), mock.patch.object(
+            common, "confirm", return_value=True
+        ), mock.patch.object(common, "pick_profile", return_value=None), mock.patch.object(
+            common, "info"
+        ) as info, mock.patch.object(
+            import_screen.nmcli, "run_nmcli", side_effect=self._fake_nmcli(existing=["test"])
+        ) as run_nmcli, mock.patch.object(
+            import_screen.nmcli, "ensure_autoconnect_off"
+        ) as autoconnect_off:
+            import_screen.run(self.screen, dry_run=False)
+
+        commands = [call.args[0] for call in run_nmcli.call_args_list]
+        self.assertFalse([c for c in commands if "import" in c])
+        autoconnect_off.assert_not_called()
+        self.assertIn("existieren bereits", info.call_args.args[2])
+
+    def test_only_the_duplicate_is_skipped_others_are_imported(self):
+        from vpn_manager.tui import common, import_screen
+
+        folder = self._folder_with("test.ovpn", "neu.ovpn")
+
+        with mock.patch.object(common, "prompt_text", return_value=folder), mock.patch.object(
+            common, "confirm", return_value=True
+        ), mock.patch.object(common, "pick_profile", return_value=None), mock.patch.object(
+            common, "info"
+        ) as info, mock.patch.object(
+            import_screen.nmcli,
+            "run_nmcli",
+            side_effect=self._fake_nmcli(existing=["test"], created=["neu"]),
+        ) as run_nmcli, mock.patch.object(
+            import_screen.nmcli, "ensure_autoconnect_off"
+        ) as autoconnect_off:
+            import_screen.run(self.screen, dry_run=False)
+
+        imported = [c[-1] for c in (call.args[0] for call in run_nmcli.call_args_list) if "import" in c]
+        self.assertEqual(len(imported), 1)
+        self.assertTrue(imported[0].endswith("neu.ovpn"))
+        self.assertEqual([c.args[0] for c in autoconnect_off.call_args_list], ["uuid-neu"])
+
+        report = info.call_args.args[2]
+        self.assertIn("test.ovpn: übersprungen", report)
+        self.assertIn("neu.ovpn: OK", report)
+
+    def test_same_stem_twice_in_one_folder_is_imported_once(self):
+        """test.conf und test.ovpn ergäben beide die Verbindung 'test'."""
+        from vpn_manager.tui import common, import_screen
+
+        folder = self._folder_with("test.conf", "test.ovpn")
+
+        with mock.patch.object(common, "prompt_text", return_value=folder), mock.patch.object(
+            common, "confirm", return_value=True
+        ), mock.patch.object(common, "pick_profile", return_value=None), mock.patch.object(
+            common, "info"
+        ) as info, mock.patch.object(
+            import_screen.nmcli, "run_nmcli", side_effect=self._fake_nmcli(created=["test"])
+        ) as run_nmcli, mock.patch.object(import_screen.nmcli, "ensure_autoconnect_off"):
+            import_screen.run(self.screen, dry_run=False)
+
+        imported = [c for c in (call.args[0] for call in run_nmcli.call_args_list) if "import" in c]
+        self.assertEqual(len(imported), 1)
+        self.assertIn("test.ovpn: übersprungen", info.call_args.args[2])
+
+    def test_duplicates_are_not_prompted_for_credentials(self):
+        from vpn_manager.tui import common, import_screen
+
+        folder = self._folder_with("test.ovpn")
+
+        with mock.patch.object(common, "prompt_text", return_value=folder), mock.patch.object(
+            common, "confirm"
+        ) as confirm, mock.patch.object(common, "pick_profile") as pick_profile, mock.patch.object(
+            common, "info"
+        ), mock.patch.object(
+            import_screen.nmcli, "run_nmcli", side_effect=self._fake_nmcli(existing=["test"])
+        ):
+            import_screen.run(self.screen, dry_run=False)
+
+        confirm.assert_not_called()
+        pick_profile.assert_not_called()
 
     def test_cancelled_folder_prompt_does_nothing(self):
         from vpn_manager.tui import common, import_screen

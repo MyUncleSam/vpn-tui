@@ -35,12 +35,34 @@ def run(screen, dry_run: bool) -> None:
         common.info(screen, "Import", "Keine *.ovpn/*.conf-Dateien in diesem Ordner gefunden.")
         return
 
-    ovpn_count = sum(1 for i in items if i.conn_type == "openvpn")
-    wg_count = sum(1 for i in items if i.conn_type == "wireguard")
+    try:
+        known = _connection_snapshot()
+    except nmcli.NmcliError as exc:
+        common.info(screen, "Fehler", f"Verbindungsliste nicht lesbar:\n{exc}")
+        return
 
-    summary = f"{wg_count} WireGuard- und {ovpn_count} OpenVPN-Datei(en) gefunden."
+    # NetworkManager benennt importierte Verbindungen nach dem Dateinamen ohne
+    # Endung – gibt es die schon, wird die Datei gar nicht erst importiert.
+    existing_names = set(known.values())
+    to_import = [i for i in items if i.path.stem not in existing_names]
+    skipped_count = len(items) - len(to_import)
+
+    if not to_import:
+        common.info(
+            screen,
+            "Import",
+            f"Alle {len(items)} Datei(en) existieren bereits als Verbindung – nichts zu tun.",
+        )
+        return
+
+    ovpn_count = sum(1 for i in to_import if i.conn_type == "openvpn")
+    wg_count = sum(1 for i in to_import if i.conn_type == "wireguard")
+
+    summary = f"Zu importieren: {wg_count} WireGuard-, {ovpn_count} OpenVPN-Datei(en)."
+    if skipped_count:
+        summary += f"\nBereits vorhanden, wird übersprungen: {skipped_count}"
     if ovpn_count == 0:
-        summary += " (WireGuard verwendet keine Zugangsdaten.)"
+        summary += "\n(WireGuard verwendet keine Zugangsdaten.)"
     if not common.confirm(screen, "Import bestätigen", summary + "\n\nJetzt importieren?"):
         return
 
@@ -55,14 +77,16 @@ def run(screen, dry_run: bool) -> None:
         if chosen:
             profile = profiles[chosen]
 
-    try:
-        known = _connection_snapshot()
-    except nmcli.NmcliError as exc:
-        common.info(screen, "Fehler", f"Verbindungsliste nicht lesbar:\n{exc}")
-        return
-
     results = []
     for item in items:
+        # Auch Dateien gleichen Stamms im selben Ordner (test.conf + test.ovpn)
+        # kollidieren – deshalb wird existing_names im Lauf mitgeführt.
+        if item.path.stem in existing_names:
+            results.append(
+                f"{item.path.name}: übersprungen – Verbindung '{item.path.stem}' existiert bereits"
+            )
+            continue
+
         try:
             nmcli.run_nmcli(
                 nmcli.build_import_command(item.conn_type, str(item.path)), dry_run=dry_run
@@ -86,6 +110,8 @@ def run(screen, dry_run: bool) -> None:
                 continue
             # Adressierung über die UUID: eindeutig auch bei doppelten Namen.
             identifier, name = created[0]
+
+        existing_names.add(name)
 
         try:
             nmcli.ensure_autoconnect_off(identifier, dry_run=dry_run)
