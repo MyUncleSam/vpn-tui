@@ -30,10 +30,36 @@ Das Tool installiert selbst keine Software.
 OpenVPN und WireGuard funktionieren unter CachyOS out-of-the-box und brauchen
 keine Zusatzpakete.
 
+## Installation
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MyUncleSam/vpn-tui/master/install.sh | sudo bash
+```
+
+Klont nach `/opt/vpn-tui` und legt den Befehl `/usr/local/bin/vpn-tui` an.
+Derselbe Befehl aktualisiert eine vorhandene Installation (`git pull`).
+
+Der Installer installiert **keine** Software – fehlt `newt` oder
+NetworkManager, nennt er am Ende nur den passenden `pacman`-Befehl. Ein
+vorhandenes `/opt/vpn-tui`, das nicht zu diesem Projekt gehört, wird nicht
+angefasst, sondern führt zum Abbruch.
+
+Zielpfade lassen sich überschreiben:
+
+```bash
+curl -fsSL .../install.sh | sudo VPN_TUI_DIR=/opt/tools/vpn-tui VPN_TUI_BIN=/usr/bin/vpn-tui bash
+```
+
+Deinstallieren:
+
+```bash
+sudo rm -rf /opt/vpn-tui /usr/local/bin/vpn-tui
+```
+
 ## Start
 
 ```bash
-python3 main.py
+vpn-tui
 ```
 
 Mit `--dry-run` werden alle `nmcli`-Kommandos nur ausgegeben statt ausgeführt –
@@ -41,11 +67,14 @@ empfehlenswert für den ersten Testlauf, um die generierten Kommandos zu prüfen
 bevor etwas real verändert wird:
 
 ```bash
-python3 main.py --dry-run
+vpn-tui --dry-run
 ```
 
-Optional per `pipx install .` bzw. `pip install --user .` installierbar,
-danach als `vpn-manager` aufrufbar.
+Ohne Installation geht es auch direkt aus dem Repository-Verzeichnis:
+
+```bash
+python3 main.py
+```
 
 ## Umgang mit lokalisierten nmcli-Ausgaben
 

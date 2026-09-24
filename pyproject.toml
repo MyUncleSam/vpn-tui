@@ -1,11 +1,11 @@
 [project]
-name = "vpn-manager"
+name = "vpn-tui"
 version = "0.1.0"
 description = "nmcli-gestützte TUI zum Mass-Import und Verwalten von OpenVPN- und WireGuard-Verbindungen"
 requires-python = ">=3.10"
 
 [project.scripts]
-vpn-manager = "vpn_manager.__main__:main"
+vpn-tui = "vpn_manager.__main__:main"
 
 [build-system]
 requires = ["setuptools>=61"]
