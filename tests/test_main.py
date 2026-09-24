@@ -30,19 +30,55 @@ class MissingSnackTests(unittest.TestCase):
 
 
 class StartupTests(unittest.TestCase):
-    def test_starts_tui_and_passes_dry_run(self):
+    @staticmethod
+    def _fake_app():
         # `vpn_manager.tui.app` importiert `snack`, das hier fehlt – daher ein
         # Fake-Modul in sys.modules injizieren statt echt zu importieren.
         fake_app = types.ModuleType("vpn_manager.tui.app")
         fake_app.run = mock.Mock()
+        return fake_app
+
+    def test_starts_tui_and_passes_dry_run(self):
+        fake_app = self._fake_app()
 
         with mock.patch("importlib.util.find_spec", return_value=object()), mock.patch.dict(
             sys.modules, {"vpn_manager.tui.app": fake_app}
         ):
             code = main(["--dry-run"])
 
-        fake_app.run.assert_called_once_with(dry_run=True)
+        fake_app.run.assert_called_once_with(dry_run=True, notice=None)
         self.assertEqual(code, 0)
+
+    def test_update_runs_on_start_and_its_notice_reaches_the_tui(self):
+        fake_app = self._fake_app()
+
+        with mock.patch("importlib.util.find_spec", return_value=object()), mock.patch.dict(
+            sys.modules, {"vpn_manager.tui.app": fake_app}
+        ), mock.patch("vpn_manager.updater.update", return_value="Neue Version eingespielt.") as up:
+            main([])
+
+        up.assert_called_once_with()
+        fake_app.run.assert_called_once_with(dry_run=False, notice="Neue Version eingespielt.")
+
+    def test_no_update_flag_skips_the_pull(self):
+        fake_app = self._fake_app()
+
+        with mock.patch("importlib.util.find_spec", return_value=object()), mock.patch.dict(
+            sys.modules, {"vpn_manager.tui.app": fake_app}
+        ), mock.patch("vpn_manager.updater.update") as up:
+            main(["--no-update"])
+
+        up.assert_not_called()
+
+    def test_dry_run_never_touches_the_checkout(self):
+        fake_app = self._fake_app()
+
+        with mock.patch("importlib.util.find_spec", return_value=object()), mock.patch.dict(
+            sys.modules, {"vpn_manager.tui.app": fake_app}
+        ), mock.patch("vpn_manager.updater.update") as up:
+            main(["--dry-run"])
+
+        up.assert_not_called()
 
 
 if __name__ == "__main__":

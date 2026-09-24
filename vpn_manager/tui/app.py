@@ -21,16 +21,22 @@ MENU_ITEMS = [
 ]
 
 
-def run(dry_run: bool = False) -> None:
+def run(dry_run: bool = False, notice: str | None = None) -> None:
+    """`notice`: einzeilige Startmeldung (z. B. vom Selbst-Update), sonst None.
+
+    Sie wird im Menü angezeigt statt per print ausgegeben – die TUI übernimmt
+    den Bildschirm sofort und würde eine gedruckte Zeile überschreiben.
+    """
     screen = SnackScreen()
     try:
         while True:
             items = [(label, idx) for idx, (label, _) in enumerate(MENU_ITEMS)]
             title = "VPN Manager" + (" [DRY-RUN]" if dry_run else "")
+            text = f"{notice}\n\nAktion wählen:" if notice else "Aktion wählen:"
             result, choice = ListboxChoiceWindow(
                 screen,
                 title,
-                "Aktion wählen:",
+                text,
                 items,
                 buttons=[("Auswählen", "select"), ("Beenden", "quit")],
                 width=50,

@@ -33,27 +33,33 @@ keine Zusatzpakete.
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MyUncleSam/vpn-tui/master/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/MyUncleSam/vpn-tui/master/install.sh | bash
 ```
 
-Klont nach `/opt/vpn-tui` und legt den Befehl `/usr/local/bin/vpn-tui` an.
-Derselbe Befehl aktualisiert eine vorhandene Installation (`git pull`).
+Kein `sudo` nötig – installiert wird ins Benutzerverzeichnis:
+
+- Code: `~/.local/share/vpn-tui`
+- Befehl: `~/.local/bin/vpn-tui`
+
+Derselbe Befehl aktualisiert eine vorhandene Installation (`git pull`). Weil
+alles dem Benutzer gehört, kann auch das Selbst-Update beim Start ohne
+Sonderrechte arbeiten.
 
 Der Installer installiert **keine** Software – fehlt `newt` oder
-NetworkManager, nennt er am Ende nur den passenden `pacman`-Befehl. Ein
-vorhandenes `/opt/vpn-tui`, das nicht zu diesem Projekt gehört, wird nicht
-angefasst, sondern führt zum Abbruch.
+NetworkManager, nennt er am Ende nur den passenden `pacman`-Befehl. Liegt im
+Zielverzeichnis etwas, das nicht zu diesem Projekt gehört, bricht er ab, statt
+es anzufassen. Liegt `~/.local/bin` nicht im `PATH`, weist er darauf hin.
 
 Zielpfade lassen sich überschreiben:
 
 ```bash
-curl -fsSL .../install.sh | sudo VPN_TUI_DIR=/opt/tools/vpn-tui VPN_TUI_BIN=/usr/bin/vpn-tui bash
+curl -fsSL .../install.sh | VPN_TUI_DIR=~/git/vpn-tui VPN_TUI_BIN=~/bin/vpn-tui bash
 ```
 
 Deinstallieren:
 
 ```bash
-sudo rm -rf /opt/vpn-tui /usr/local/bin/vpn-tui
+rm -rf ~/.local/share/vpn-tui ~/.local/bin/vpn-tui
 ```
 
 ## Start
@@ -74,6 +80,24 @@ Ohne Installation geht es auch direkt aus dem Repository-Verzeichnis:
 
 ```bash
 python3 main.py
+```
+
+### Selbst-Update beim Start
+
+Beim Start wird kurz `git pull --ff-only` im eigenen Verzeichnis ausgeführt,
+damit immer die aktuelle Version läuft. Das blockiert den Start nie:
+
+- Timeout von 5 Sekunden – ohne Internet startet das Tool einfach weiter
+- git darf dabei nicht nach Zugangsdaten fragen (`GIT_TERMINAL_PROMPT=0`),
+  sonst würde ein Prompt am Timeout vorbei hängen bleiben
+- lokale Änderungen werden durch `--ff-only` nie überschrieben
+- das Ergebnis erscheint als Hinweiszeile im Hauptmenü
+
+Abschalten mit `--no-update`; bei `--dry-run` unterbleibt es ohnehin, weil
+dabei nichts verändert wird:
+
+```bash
+vpn-tui --no-update
 ```
 
 ## Umgang mit lokalisierten nmcli-Ausgaben

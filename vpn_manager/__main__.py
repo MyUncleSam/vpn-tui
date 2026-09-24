@@ -9,7 +9,7 @@ import sys
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="vpn-manager",
+        prog="vpn-tui",
         description="Mass-Import und Verwaltung von OpenVPN- und WireGuard-Verbindungen über nmcli.",
     )
     parser.add_argument(
@@ -17,11 +17,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Zeigt alle nmcli-Kommandos nur an, statt sie auszuführen.",
     )
+    parser.add_argument(
+        "--no-update",
+        action="store_true",
+        help="Überspringt die Update-Prüfung (git pull) beim Start.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+
+    notice = None
+    # Im Dry-Run wird bewusst nichts verändert – auch nicht der eigene Checkout.
+    if not args.no_update and not args.dry_run:
+        from vpn_manager import updater
+
+        notice = updater.update()
 
     if importlib.util.find_spec("snack") is None:
         print(
@@ -32,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from vpn_manager.tui.app import run
 
-    run(dry_run=args.dry_run)
+    run(dry_run=args.dry_run, notice=notice)
     return 0
 
 
