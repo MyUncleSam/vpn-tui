@@ -4,14 +4,20 @@ from __future__ import annotations
 
 from snack import ListboxChoiceWindow, SnackScreen
 
-from vpn_manager.tui import credentials_screen, delete_screen, ikev2_screen, import_screen, prep_screen
+from vpn_manager.tui import (
+    apply_credentials_screen,
+    autoconnect_screen,
+    credentials_screen,
+    delete_screen,
+    import_screen,
+)
 
 MENU_ITEMS = [
     ("Zugangsdaten verwalten", credentials_screen.run),
     ("Import (OpenVPN/WireGuard)", import_screen.run),
-    ("IKEv2/IPsec-Verbindung anlegen", ikev2_screen.run),
+    ("Zugangsdaten auf Verbindungen anwenden", apply_credentials_screen.run),
+    ("Autoconnect deaktivieren", autoconnect_screen.run),
     ("VPN-Verbindungen löschen", delete_screen.run),
-    ("Vorbereitung (Pakete installieren)", prep_screen.run),
 ]
 
 
@@ -26,11 +32,14 @@ def run(dry_run: bool = False) -> None:
                 title,
                 "Aktion wählen:",
                 items,
-                buttons=["Auswählen", "Beenden"],
+                buttons=[("Auswählen", "select"), ("Beenden", "quit")],
                 width=50,
                 height=len(items),
             )
-            if result != "Auswählen" or choice is None:
+            # result ist None, wenn ein Eintrag direkt mit Enter bestätigt wurde
+            # (ListboxChoiceWindow baut die Liste intern mit returnExit=1) – das
+            # ist ebenfalls eine Auswahl, kein Abbruch.
+            if result == "quit":
                 break
             _, handler = MENU_ITEMS[choice]
             handler(screen, dry_run)

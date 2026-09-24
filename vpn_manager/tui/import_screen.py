@@ -9,8 +9,20 @@ from vpn_manager import importer, nmcli
 from vpn_manager.tui import common
 
 
+def _connection_snapshot() -> dict[str, str]:
+    """{uuid: name} aller Verbindungen – lesend, läuft auch im Dry-Run echt."""
+    result = nmcli.run_nmcli(nmcli.build_uuid_list_command(), dry_run=False)
+    return nmcli.parse_uuid_list(result.stdout)
+
+
 def run(screen, dry_run: bool) -> None:
-    folder_str = common.prompt_text(screen, "Import", "Ordner mit *.ovpn/*.conf-Dateien:")
+    folder_str = common.prompt_text(
+        screen,
+        "Import",
+        "Aus welchem Ordner sollen die Konfigurationsdateien importiert werden?\n"
+        "(*.ovpn für OpenVPN, *.conf für WireGuard)",
+        "Ordner:",
+    )
     if not folder_str:
         return
     folder = Path(folder_str).expanduser()
@@ -34,33 +46,65 @@ def run(screen, dry_run: bool) -> None:
 
     profile = None
     if ovpn_count > 0:
-        profiles = creds.load_profiles()
+        try:
+            profiles = creds.load_profiles()
+        except creds.CredentialsFileError as exc:
+            common.info(screen, "Warnung", f"{exc}\n\nImport läuft ohne Zugangsdaten weiter.")
+            profiles = {}
         chosen = common.pick_profile(screen, profiles, title="Zugangsdaten für OpenVPN (optional)")
         if chosen:
             profile = profiles[chosen]
 
+    try:
+        known = _connection_snapshot()
+    except nmcli.NmcliError as exc:
+        common.info(screen, "Fehler", f"Verbindungsliste nicht lesbar:\n{exc}")
+        return
+
     results = []
     for item in items:
         try:
-            res = nmcli.run_nmcli(
+            nmcli.run_nmcli(
                 nmcli.build_import_command(item.conn_type, str(item.path)), dry_run=dry_run
             )
-            name = item.path.stem if dry_run else nmcli.parse_import_output(res.stdout)
-            if name is None:
-                results.append(f"{item.path.name}: Import ok, Verbindungsname nicht erkannt")
+        except nmcli.NmcliError as exc:
+            results.append(f"{item.path.name}: FEHLER beim Import - {exc}")
+            continue
+
+        if dry_run:
+            identifier = name = item.path.stem
+        else:
+            try:
+                current = _connection_snapshot()
+            except nmcli.NmcliError as exc:
+                results.append(f"{item.path.name}: Import OK, Verbindungsliste nicht lesbar - {exc}")
                 continue
+            created = nmcli.new_connections(known, current)
+            known = current
+            if not created:
+                results.append(f"{item.path.name}: Import lief durch, neue Verbindung nicht gefunden")
+                continue
+            # Adressierung über die UUID: eindeutig auch bei doppelten Namen.
+            identifier, name = created[0]
 
-            nmcli.ensure_autoconnect_off(name, dry_run=dry_run)
+        try:
+            nmcli.ensure_autoconnect_off(identifier, dry_run=dry_run)
+        except nmcli.NmcliError as exc:
+            results.append(
+                f"{item.path.name}: Import OK ({name}), aber autoconnect konnte NICHT "
+                f"deaktiviert werden - {exc}"
+            )
+            continue
 
+        try:
             if item.conn_type == "openvpn" and profile is not None:
                 data_cmd, secret_cmd = nmcli.build_openvpn_credentials_commands(
-                    name, profile.username, profile.password
+                    identifier, profile.username, profile.password
                 )
                 nmcli.run_nmcli(data_cmd, dry_run=dry_run)
                 nmcli.run_nmcli(secret_cmd, dry_run=dry_run)
-
             results.append(f"{item.path.name}: OK ({name})")
         except nmcli.NmcliError as exc:
-            results.append(f"{item.path.name}: FEHLER - {exc}")
+            results.append(f"{item.path.name}: Import OK ({name}), Zugangsdaten FEHLER - {exc}")
 
     common.info(screen, "Import abgeschlossen", "\n".join(results))

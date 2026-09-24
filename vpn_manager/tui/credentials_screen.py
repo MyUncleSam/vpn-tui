@@ -31,13 +31,20 @@ def _edit_form(screen, title: str, provider: str = "", username: str = "", passw
 
 def run(screen, dry_run: bool) -> None:
     while True:
-        profiles = creds.load_profiles()
+        try:
+            profiles = creds.load_profiles()
+        except creds.CredentialsFileError as exc:
+            common.info(screen, "Fehler", str(exc))
+            return
         items = [
             (f"{name} ({profile.provider}, {profile.username})", name)
             for name, profile in profiles.items()
         ]
 
-        listbox = Listbox(height=min(max(len(items), 1), 10), width=50, returnExit=0)
+        height = min(max(len(items), 1), 10)
+        listbox = Listbox(
+            height=height, width=50, returnExit=0, scroll=1 if len(items) > height else 0
+        )
         for text, value in items:
             listbox.append(text, value)
         if not items:
@@ -58,7 +65,12 @@ def run(screen, dry_run: bool) -> None:
         selected = listbox.current()
 
         if action == "new":
-            name = common.prompt_text(screen, "Neues Profil", "Profilname:")
+            name = common.prompt_text(
+                screen,
+                "Neues Profil",
+                "Name für das neue Zugangsdaten-Profil:",
+                "Name:",
+            )
             if not name:
                 continue
             if name in profiles:

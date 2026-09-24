@@ -1,3 +1,4 @@
+import os
 import stat
 import tempfile
 import unittest
@@ -26,6 +27,31 @@ class CredentialStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "does-not-exist.json"
             self.assertEqual(creds.load_profiles(path), {})
+
+    def test_load_corrupted_json_raises_credentials_file_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "credentials.json"
+            path.write_text("{not valid json")
+            with self.assertRaises(creds.CredentialsFileError):
+                creds.load_profiles(path)
+
+    def test_load_profile_missing_field_raises_credentials_file_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "credentials.json"
+            path.write_text('{"Nord": {"provider": "NordVPN"}}')
+            with self.assertRaises(creds.CredentialsFileError):
+                creds.load_profiles(path)
+
+    def test_save_profiles_creates_file_with_0600_even_with_permissive_umask(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "credentials.json"
+            old_umask = os.umask(0o022)
+            try:
+                profiles = creds.add_profile({}, "Nord", "NordVPN", "alice", "s3cret")
+                creds.save_profiles(profiles, path)
+            finally:
+                os.umask(old_umask)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_add_duplicate_name_raises(self):
         profiles = creds.add_profile({}, "Nord", "NordVPN", "alice", "s3cret")

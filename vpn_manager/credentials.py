@@ -14,6 +14,10 @@ from pathlib import Path
 from vpn_manager import config
 
 
+class CredentialsFileError(ValueError):
+    """Die Credentials-Datei existiert, ist aber kein gültiger Profil-Store."""
+
+
 @dataclass
 class CredentialProfile:
     provider: str
@@ -24,15 +28,28 @@ class CredentialProfile:
 def load_profiles(path: Path = config.CREDENTIALS_FILE) -> dict[str, CredentialProfile]:
     if not path.exists():
         return {}
-    raw = json.loads(path.read_text())
-    return {name: CredentialProfile(**fields) for name, fields in raw.items()}
+    try:
+        raw = json.loads(path.read_text())
+        return {name: CredentialProfile(**fields) for name, fields in raw.items()}
+    except (json.JSONDecodeError, TypeError, KeyError) as exc:
+        raise CredentialsFileError(f"Zugangsdaten-Datei '{path}' ist beschädigt: {exc}") from exc
 
 
 def save_profiles(profiles: dict[str, CredentialProfile], path: Path = config.CREDENTIALS_FILE) -> None:
     config.ensure_config_dir(path.parent)
     raw = {name: asdict(profile) for name, profile in profiles.items()}
-    path.write_text(json.dumps(raw, indent=2, ensure_ascii=False))
-    os.chmod(path, 0o600)
+    content = json.dumps(raw, indent=2, ensure_ascii=False)
+    # Datei atomar mit 0o600 anlegen statt erst zu schreiben und danach zu
+    # chmod'en – sonst existiert kurzzeitig eine Klartext-Passwortdatei mit
+    # Standard-umask-Rechten (z. B. 0o644).
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+    finally:
+        # Falls die Datei vorher mit anderen Rechten existierte (O_CREAT
+        # ändert den Modus bestehender Dateien nicht), zusätzlich erzwingen.
+        os.chmod(path, 0o600)
 
 
 def add_profile(

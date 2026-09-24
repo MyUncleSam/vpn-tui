@@ -29,6 +29,11 @@ class BuilderTests(unittest.TestCase):
     def test_build_list_command(self):
         self.assertEqual(nmcli.build_list_command(), ["-t", "-f", "NAME,TYPE", "connection", "show"])
 
+    def test_build_uuid_list_command(self):
+        self.assertEqual(
+            nmcli.build_uuid_list_command(), ["-t", "-f", "UUID,NAME", "connection", "show"]
+        )
+
     def test_build_vpn_data_string(self):
         self.assertEqual(
             nmcli.build_vpn_data_string({"address": "1.2.3.4", "method": "eap"}),
@@ -45,12 +50,31 @@ class BuilderTests(unittest.TestCase):
 
 
 class ParserTests(unittest.TestCase):
-    def test_parse_import_output_success(self):
-        stdout = "Connection 'MyConn' (uuid-1234) successfully added.\n"
-        self.assertEqual(nmcli.parse_import_output(stdout), "MyConn")
+    def test_parse_uuid_list(self):
+        output = "uuid-1:MyWireguard\nuuid-2:MyOpenVPN\n"
+        self.assertEqual(
+            nmcli.parse_uuid_list(output), {"uuid-1": "MyWireguard", "uuid-2": "MyOpenVPN"}
+        )
 
-    def test_parse_import_output_unexpected_format(self):
-        self.assertIsNone(nmcli.parse_import_output("some unrelated output"))
+    def test_parse_uuid_list_escaped_colon(self):
+        self.assertEqual(
+            nmcli.parse_uuid_list("uuid-1:10.0.0.1\\:443 VPN\n"), {"uuid-1": "10.0.0.1:443 VPN"}
+        )
+
+    def test_new_connections_returns_only_added(self):
+        before = {"uuid-1": "Alt"}
+        after = {"uuid-1": "Alt", "uuid-2": "Neu"}
+        self.assertEqual(nmcli.new_connections(before, after), [("uuid-2", "Neu")])
+
+    def test_new_connections_empty_when_nothing_added(self):
+        same = {"uuid-1": "Alt"}
+        self.assertEqual(nmcli.new_connections(same, same), [])
+
+    def test_new_connections_detects_duplicate_name_as_separate_connection(self):
+        """Gleicher Name, andere UUID: genau der Fall, den Namensvergleich nicht erkennt."""
+        before = {"uuid-1": "server-nl"}
+        after = {"uuid-1": "server-nl", "uuid-2": "server-nl"}
+        self.assertEqual(nmcli.new_connections(before, after), [("uuid-2", "server-nl")])
 
     def test_parse_connection_list(self):
         output = "MyWireguard:wireguard\nMyOpenVPN:vpn\nHome Wifi:802-11-wireless\n"
@@ -66,6 +90,51 @@ class ParserTests(unittest.TestCase):
     def test_filter_vpn_connections(self):
         parsed = [("MyWireguard", "wireguard"), ("MyOpenVPN", "vpn"), ("Home Wifi", "802-11-wireless")]
         self.assertEqual(nmcli.filter_vpn_connections(parsed), ["MyWireguard", "MyOpenVPN"])
+
+    def test_filter_excludes_wireguard_for_password_types(self):
+        parsed = [("MyWireguard", "wireguard"), ("MyOpenVPN", "vpn"), ("Home Wifi", "802-11-wireless")]
+        self.assertEqual(
+            nmcli.filter_vpn_connections(parsed, types=nmcli.PASSWORD_VPN_TYPES), ["MyOpenVPN"]
+        )
+
+    def test_parse_service_type_terse(self):
+        self.assertEqual(
+            nmcli.parse_service_type("org.freedesktop.NetworkManager.openvpn\n"), "openvpn"
+        )
+
+    def test_parse_service_type_verbose(self):
+        output = "vpn.service-type:        org.freedesktop.NetworkManager.openconnect\n"
+        self.assertEqual(nmcli.parse_service_type(output), "openconnect")
+
+    def test_parse_service_type_empty(self):
+        self.assertEqual(nmcli.parse_service_type("\n"), "")
+
+    def test_build_autoconnect_list_command(self):
+        self.assertEqual(
+            nmcli.build_autoconnect_list_command(),
+            ["-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"],
+        )
+
+    def test_parse_autoconnect_list(self):
+        output = "MyWireguard:wireguard:yes\nMyOpenVPN:vpn:no\nHome Wifi:802-11-wireless:yes\n"
+        self.assertEqual(
+            nmcli.parse_autoconnect_list(output),
+            [
+                ("MyWireguard", "wireguard", True),
+                ("MyOpenVPN", "vpn", False),
+                ("Home Wifi", "802-11-wireless", True),
+            ],
+        )
+
+    def test_parse_autoconnect_list_escaped_colon(self):
+        output = "10.0.0.1\\:443 VPN:vpn:yes\n"
+        self.assertEqual(nmcli.parse_autoconnect_list(output), [("10.0.0.1:443 VPN", "vpn", True)])
+
+    def test_build_service_type_command(self):
+        self.assertEqual(
+            nmcli.build_service_type_command("MyConn"),
+            ["-t", "-f", "vpn.service-type", "connection", "show", "MyConn"],
+        )
 
 
 class RunNmcliTests(unittest.TestCase):
@@ -101,6 +170,18 @@ class RunNmcliTests(unittest.TestCase):
 
         result = nmcli.run_nmcli(["connection", "show"], check=False, runner=runner)
         self.assertEqual(result.returncode, 1)
+
+    def test_forces_stable_locale_so_output_stays_parsable(self):
+        captured = {}
+
+        def runner(argv, **kwargs):
+            captured.update(kwargs)
+            return FakeCompleted(returncode=0, stdout="", stderr="")
+
+        nmcli.run_nmcli(["connection", "show"], runner=runner)
+
+        self.assertEqual(captured["env"]["LC_ALL"], "C")
+        self.assertNotIn("LANGUAGE", captured["env"])
 
     def test_missing_nmcli_binary(self):
         def runner(argv, **kwargs):

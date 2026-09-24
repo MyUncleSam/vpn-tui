@@ -2,23 +2,33 @@
 
 Kleine TUI (newt/snack, optisch angelehnt an `nmtui`) für CachyOS/KDE Plasma
 (NetworkManager), um viele OpenVPN-/WireGuard-Konfigurationsdateien in einem
-Rutsch per `nmcli` zu importieren, IKEv2/IPsec-Verbindungen anzulegen und
-VPN-Verbindungen zentral zu verwalten – statt für jede Datei einzeln durch
-die grafische Import-Dialoge zu klicken.
+Rutsch per `nmcli` zu importieren und zentral zu verwalten – statt für jede
+Datei einzeln durch die grafischen Import-Dialoge zu klicken.
 
-Jede vom Tool angelegte/importierte Verbindung bekommt automatisch
+Menüpunkte:
+
+- **Zugangsdaten verwalten** – benannte Profile (Anbieter, Username, Passwort)
+- **Import** – alle `*.ovpn`/`*.conf` eines Ordners importieren, optional mit Zugangsdaten
+- **Zugangsdaten auf Verbindungen anwenden** – mehrere bestehende Verbindungen
+  markieren und ein Zugangsdaten-Profil auf alle gleichzeitig anwenden
+- **Autoconnect deaktivieren** – zeigt den Autoconnect-Status aller
+  VPN-Verbindungen, wählt die aktiven vor und schaltet sie gesammelt ab
+- **VPN-Verbindungen löschen** – Mehrfachauswahl per Checkbox
+
+Jede vom Tool importierte Verbindung bekommt automatisch
 `connection.autoconnect no` – nichts wählt sich beim Systemstart von selbst ein.
+
+Das Tool installiert selbst keine Software.
 
 ## Voraussetzungen
 
 - Python 3.10+
-- `newt` (Arch/CachyOS-Paket, liefert die Python-Bindings `snack`). Fehlt es
-  beim Start, bietet das Programm einmalig an, es per `pacman` zu installieren.
-- `nmcli` (NetworkManager) – auf CachyOS mit KDE Plasma in der Regel bereits
-  vorhanden.
-- Für den Import/Verwaltung: `networkmanager-openvpn`, `wireguard-tools`,
-  `networkmanager-strongswan` (inkl. `strongswan`) – Menüpunkt „Vorbereitung“
-  prüft und installiert diese bei Bedarf.
+- `nmcli` (NetworkManager) – auf CachyOS mit KDE Plasma bereits vorhanden.
+- `newt` (liefert die Python-Bindings `snack`). Fehlt es, nennt das Programm
+  beim Start den nötigen Befehl: `sudo pacman -S newt`
+
+OpenVPN und WireGuard funktionieren unter CachyOS out-of-the-box und brauchen
+keine Zusatzpakete.
 
 ## Start
 
@@ -26,9 +36,9 @@ Jede vom Tool angelegte/importierte Verbindung bekommt automatisch
 python3 main.py
 ```
 
-Mit `--dry-run` werden alle `nmcli`-/`pacman`-Kommandos nur ausgegeben statt
-ausgeführt – empfehlenswert für den allerersten Testlauf, um die generierten
-Kommandos zu prüfen, bevor irgendetwas real verändert wird:
+Mit `--dry-run` werden alle `nmcli`-Kommandos nur ausgegeben statt ausgeführt –
+empfehlenswert für den ersten Testlauf, um die generierten Kommandos zu prüfen,
+bevor etwas real verändert wird:
 
 ```bash
 python3 main.py --dry-run
@@ -37,20 +47,27 @@ python3 main.py --dry-run
 Optional per `pipx install .` bzw. `pip install --user .` installierbar,
 danach als `vpn-manager` aufrufbar.
 
-## Bekannte Unsicherheit: IKEv2/EAP-Username
+## Umgang mit lokalisierten nmcli-Ausgaben
 
-Der `vpn.data`-Key für EAP-Username beim strongswan-NetworkManager-Plugin
-(`STRONGSWAN_USERNAME_KEY` in `vpn_manager/ikev2.py`, aktuell `eap_identity`)
-ist nicht mit letzter Sicherheit belegt. Schlägt `nmcli` beim Anwenden von
-Zugangsdaten mit „unknown property“ o. ä. fehl, den korrekten Key über
-`man nm-settings-strongswan` bzw. `nmcli connection edit type vpn` →
-`print vpn.data` ermitteln und die Konstante entsprechend anpassen.
+nmcli übersetzt seine Ausgaben – und zwar nicht nur Meldungen, sondern auch
+Werte wie `yes`/`no` (→ `ja`/`nein`), selbst in der Terse-Ausgabe `-t`. Nicht
+übersetzt werden Exit-Codes und Bezeichner (`NAME`, `UUID`, `TYPE`).
 
-## Privilegien für die Paketinstallation
+Das Tool geht deshalb zweigleisig vor:
 
-Standardmäßig wird `sudo pacman -S --needed ...` verwendet (Terminal-Prompt,
-kein Polkit-Agent nötig). Für einen grafischen Prompt stattdessen `pkexec`
-verwenden: `PRIVILEGE = "pkexec"` in `vpn_manager/packages.py` setzen.
+- alle nmcli-Aufrufe laufen mit `LC_ALL=C` (siehe `nmcli.stable_output_env`)
+- beim Import wird die neu angelegte Verbindung nicht aus der Erfolgsmeldung
+  gelesen, sondern über die Differenz der UUID-Liste vor/nach dem Import
+  ermittelt (`nmcli.new_connections`). Adressiert wird anschließend über die
+  UUID – eindeutig auch bei doppelten Verbindungsnamen.
+
+## Offener Punkt: gespeicherte Passwörter
+
+Fragt NetworkManager trotz hinterlegtem Passwort beim Verbinden weiterhin
+danach, fehlt vermutlich `password-flags=0` in `vpn.data` (Passwort systemweit
+speichern statt vom Agent abfragen). Ergänzt würde das zentral in
+`nmcli.build_openvpn_credentials_commands` – die Funktion wird von „Import“ und
+„Zugangsdaten anwenden“ gemeinsam genutzt.
 
 ## Zugangsdaten-Speicherung
 
@@ -64,7 +81,7 @@ Zugangsdaten-Profile (Anbieter/Username/Passwort) liegen als Klartext-JSON in
 python3 -m unittest discover -s tests
 ```
 
-Deckt die komplette Logik (nmcli-Kommandoaufbau, Credential-CRUD,
-Ordner-Scan, Paket-Checks) ohne `nmcli`/`snack`/`pacman` ab. Die TUI-Screens
-selbst (`vpn_manager/tui/`) benötigen `snack` und müssen auf dem Zielsystem
-manuell durchgespielt werden (siehe Verifikationsschritte im Plan).
+Deckt die komplette Logik (nmcli-Kommandoaufbau, Credential-CRUD, Ordner-Scan)
+sowie den Ablauf aller TUI-Screens ab – ohne dass `nmcli` oder `snack`
+installiert sein müssen. Die Screens selbst müssen auf dem Zielsystem manuell
+durchgespielt werden.
