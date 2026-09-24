@@ -1,0 +1,15 @@
+[project]
+name = "vpn-manager"
+version = "0.1.0"
+description = "nmcli-gestützte TUI zum Mass-Import und Verwalten von OpenVPN-, WireGuard- und IKEv2/IPsec-Verbindungen"
+requires-python = ">=3.10"
+
+[project.scripts]
+vpn-manager = "vpn_manager.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["vpn_manager*"]
