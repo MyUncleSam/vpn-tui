@@ -23,8 +23,9 @@ def _edit_form(screen, title: str, provider: str = "", username: str = "", passw
     form.add(password_entry, 1, 2)
     form.add(buttons, 0, 3, growx=1)
 
-    result = form.runOnce()
-    if buttons.buttonPressed(result) != "save":
+    # Kein q-Hotkey: hier werden Anbieter/Username/Passwort getippt.
+    result = common.run_form(form, quit_key=False)
+    if common.is_cancel(result) or buttons.buttonPressed(result) != "save":
         return None
     return provider_entry.value(), username_entry.value(), password_entry.value()
 
@@ -56,7 +57,9 @@ def run(screen, dry_run: bool) -> None:
         form = GridForm(screen, "Zugangsdaten verwalten", 1, 2)
         form.add(listbox, 0, 0)
         form.add(buttons, 0, 1, growx=1)
-        result = form.runOnce()
+        result = common.run_form(form)
+        if common.is_cancel(result):
+            return
         action = buttons.buttonPressed(result)
 
         if action in (None, "back"):

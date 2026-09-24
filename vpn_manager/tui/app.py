@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from snack import ListboxChoiceWindow, SnackScreen
+from snack import SnackScreen
 
 from vpn_manager.tui import (
     apply_credentials_screen,
     autoconnect_screen,
+    common,
     credentials_screen,
     delete_screen,
     import_screen,
@@ -32,22 +33,17 @@ def run(dry_run: bool = False, notice: str | None = None) -> None:
         while True:
             items = [(label, idx) for idx, (label, _) in enumerate(MENU_ITEMS)]
             title = "VPN Manager" + (" [DRY-RUN]" if dry_run else "")
-            text = f"{notice}\n\nAktion wählen:" if notice else "Aktion wählen:"
-            result, choice = ListboxChoiceWindow(
-                screen,
-                title,
-                text,
-                items,
-                buttons=[("Auswählen", "select"), ("Beenden", "quit")],
-                width=50,
-                height=len(items),
-            )
-            # result ist None, wenn ein Eintrag direkt mit Enter bestätigt wurde
-            # (ListboxChoiceWindow baut die Liste intern mit returnExit=1) – das
-            # ist ebenfalls eine Auswahl, kein Abbruch.
-            if result == "quit":
+            hint = "Aktion wählen (ESC oder Q beendet):"
+            text = f"{notice}\n\n{hint}" if notice else hint
+
+            choice = common.choose(screen, title, text, items, cancel=("Beenden", "quit"))
+            if choice is None:
                 break
             _, handler = MENU_ITEMS[choice]
             handler(screen, dry_run)
+    except KeyboardInterrupt:
+        # Falls Ctrl+C doch als SIGINT durchkommt: sauber beenden statt Traceback.
+        pass
     finally:
+        # Stellt das Terminal in jedem Fall wieder her.
         screen.finish()

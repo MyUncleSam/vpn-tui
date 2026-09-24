@@ -1,14 +1,13 @@
 """Regressionstests für den Hauptmenü-Loop.
 
 Hintergrund: snack leitet den Rückgabewert eines Buttons aus dessen Text ab und
-schreibt ihn klein, wenn der Button als einfacher String übergeben wird
-(`ButtonBar`: `value = blist.lower()`). Zusätzlich baut `ListboxChoiceWindow`
-die Liste intern mit `returnExit=1` – wird ein Eintrag direkt mit Enter
-bestätigt, ist der zurückgegebene Button-Wert `None`. Beides hatte das Menü
-früher als „Beenden" gewertet, wodurch sich die TUI bei jeder Auswahl schloss.
+schreibt ihn klein (`ButtonBar`: `value = blist.lower()`), wenn der Button als
+einfacher String übergeben wird. Zusätzlich beenden Listen mit `returnExit=1`
+das Formular direkt – `buttonPressed()` liefert dann `None`. Beides hatte das
+Menü früher als „Beenden" gewertet, wodurch sich die TUI bei jeder Auswahl
+schloss. Die Auswahl läuft deshalb über `common.choose`, das beides kapselt.
 
-`snack` ist hier nicht installiert, daher wird ein Fake-Modul injiziert; die
-nachgebildeten Rückgabewerte stammen aus der echten snack-Quelle.
+`snack` ist hier nicht installiert, daher wird ein Fake-Modul injiziert.
 """
 
 import sys
@@ -18,15 +17,14 @@ from unittest import mock
 
 SNACK_NAMES = (
     "SnackScreen",
-    "ListboxChoiceWindow",
-    "ButtonChoiceWindow",
-    "EntryWindow",
     "ButtonBar",
     "CheckboxTree",
+    "Entry",
+    "Grid",
     "GridForm",
     "Label",
     "Listbox",
-    "Entry",
+    "TextboxReflowed",
 )
 
 
@@ -49,53 +47,63 @@ class MainMenuFlowTests(unittest.TestCase):
         for name in [m for m in sys.modules if m.startswith("vpn_manager.tui")]:
             del sys.modules[name]
 
-    def test_enter_on_entry_selects_instead_of_quitting(self):
-        from vpn_manager.tui import app
+    def test_selecting_an_entry_runs_it_and_keeps_the_menu_open(self):
+        from vpn_manager.tui import app, common
 
         handler = mock.Mock()
         app.MENU_ITEMS = [("Eintrag A", handler), ("Eintrag B", mock.Mock())]
-        # 1. Durchlauf: Enter auf Eintrag 0 -> Button-Wert None; 2. Durchlauf: "Beenden"
-        self.snack.ListboxChoiceWindow.side_effect = [(None, 0), ("quit", 0)]
 
-        app.run(dry_run=False)
+        with mock.patch.object(common, "choose", side_effect=[0, None]) as choose:
+            app.run(dry_run=False)
 
         handler.assert_called_once()
-        self.assertEqual(self.snack.ListboxChoiceWindow.call_count, 2)
+        self.assertEqual(choose.call_count, 2)
 
-    def test_select_button_runs_handler(self):
-        from vpn_manager.tui import app
+    def test_cancelling_the_menu_exits(self):
+        from vpn_manager.tui import app, common
 
         handler = mock.Mock()
         app.MENU_ITEMS = [("Eintrag A", handler)]
-        self.snack.ListboxChoiceWindow.side_effect = [("select", 0), ("quit", 0)]
 
-        app.run(dry_run=False)
-
-        handler.assert_called_once()
-
-    def test_quit_button_exits_without_running_handler(self):
-        from vpn_manager.tui import app
-
-        handler = mock.Mock()
-        app.MENU_ITEMS = [("Eintrag A", handler)]
-        self.snack.ListboxChoiceWindow.side_effect = [("quit", 0)]
-
-        app.run(dry_run=False)
+        with mock.patch.object(common, "choose", return_value=None):
+            app.run(dry_run=False)
 
         handler.assert_not_called()
+        self.snack.SnackScreen.return_value.finish.assert_called_once()
 
-    def test_buttons_are_passed_as_tuples_not_plain_strings(self):
-        """Plain-String-Buttons würden von snack kleingeschrieben zurückgegeben."""
-        from vpn_manager.tui import app
+    def test_esc_hint_and_quit_button_are_offered(self):
+        from vpn_manager.tui import app, common
 
         app.MENU_ITEMS = [("Eintrag A", mock.Mock())]
-        self.snack.ListboxChoiceWindow.side_effect = [("quit", 0)]
 
-        app.run(dry_run=False)
+        with mock.patch.object(common, "choose", return_value=None) as choose:
+            app.run(dry_run=False)
 
-        buttons = self.snack.ListboxChoiceWindow.call_args.kwargs["buttons"]
-        for button in buttons:
-            self.assertIsInstance(button, tuple, f"Button {button!r} muss (Text, Wert) sein")
+        text = choose.call_args.args[2]
+        self.assertIn("ESC", text)
+        # Plain-String-Buttons würde snack kleingeschrieben zurückgeben.
+        self.assertIsInstance(choose.call_args.kwargs["cancel"], tuple)
+
+    def test_notice_from_self_update_is_shown_in_the_menu(self):
+        from vpn_manager.tui import app, common
+
+        app.MENU_ITEMS = [("Eintrag A", mock.Mock())]
+
+        with mock.patch.object(common, "choose", return_value=None) as choose:
+            app.run(dry_run=False, notice="Neue Version eingespielt.")
+
+        self.assertIn("Neue Version eingespielt.", choose.call_args.args[2])
+
+    def test_ctrl_c_exits_cleanly_and_restores_the_terminal(self):
+        """Notausstieg, falls Ctrl+C als SIGINT durchkommt – kein Traceback."""
+        from vpn_manager.tui import app, common
+
+        app.MENU_ITEMS = [("Eintrag A", mock.Mock())]
+
+        with mock.patch.object(common, "choose", side_effect=KeyboardInterrupt):
+            app.run(dry_run=False)
+
+        self.snack.SnackScreen.return_value.finish.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -18,15 +18,14 @@ from vpn_manager import nmcli
 
 SNACK_NAMES = (
     "SnackScreen",
-    "ListboxChoiceWindow",
-    "ButtonChoiceWindow",
-    "EntryWindow",
     "ButtonBar",
     "CheckboxTree",
+    "Entry",
+    "Grid",
     "GridForm",
     "Label",
     "Listbox",
-    "Entry",
+    "TextboxReflowed",
 )
 
 
@@ -45,6 +44,8 @@ class ScreenTestCase(unittest.TestCase):
         self.addCleanup(self._purge_tui_modules)
 
         self.screen = mock.MagicMock(name="SnackScreen")
+        # Dialoge rechnen mit screen.height; ein MagicMock wäre nicht vergleichbar.
+        self.screen.height = 40
 
     @staticmethod
     def _purge_tui_modules():
@@ -459,6 +460,147 @@ class ApplyCredentialsScreenTests(ScreenTestCase):
         confirm.assert_not_called()
         commands = [call.args[0] for call in run_nmcli.call_args_list]
         self.assertFalse([c for c in commands if "modify" in c])
+
+
+class EscapeTests(ScreenTestCase):
+    """ESC muss jeden Dialog abbrechen – der Notausstieg, wenn die UI unlesbar ist.
+
+    snacks Komfortfunktionen reagieren nicht auf ESC; die Dialoge registrieren
+    die Taste deshalb selbst per addHotKey am Formular.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.snack.GridForm.return_value.runOnce.return_value = "ESC"
+
+    def test_confirm_counts_as_no(self):
+        from vpn_manager.tui import common
+
+        # Ohne ESC-Prüfung würde der ButtonBar hier "yes" melden.
+        self.snack.ButtonBar.return_value.buttonPressed.return_value = "yes"
+        self.assertFalse(common.confirm(self.screen, "Titel", "wirklich?"))
+
+    def test_prompt_form_returns_nothing(self):
+        from vpn_manager.tui import common
+
+        self.snack.ButtonBar.return_value.buttonPressed.return_value = "ok"
+        self.assertEqual(
+            common.prompt_form(self.screen, "Titel", "Text", [("Feld", "")]), (None, None)
+        )
+
+    def test_prompt_text_returns_none(self):
+        from vpn_manager.tui import common
+
+        self.snack.ButtonBar.return_value.buttonPressed.return_value = "ok"
+        self.assertIsNone(common.prompt_text(self.screen, "Titel", "Text", "Feld:"))
+
+    def test_choose_returns_none(self):
+        from vpn_manager.tui import common
+
+        self.snack.ButtonBar.return_value.buttonPressed.return_value = "select"
+        self.assertIsNone(common.choose(self.screen, "Titel", "Text", [("A", 0)]))
+
+    def test_pick_connections_returns_nothing_selected(self):
+        from vpn_manager.tui import common
+
+        self.snack.ButtonBar.return_value.buttonPressed.return_value = "go"
+        self.assertEqual(
+            common.pick_connections(self.screen, ["A"], "Titel", "Text", "Los", "go"), []
+        )
+
+    def _dialogs_without_text_entry(self):
+        from vpn_manager.tui import common
+
+        return {
+            "info": lambda: common.info(self.screen, "Titel", "Text"),
+            "confirm": lambda: common.confirm(self.screen, "Titel", "Text"),
+            "choose": lambda: common.choose(self.screen, "Titel", "Text", [("A", 0)]),
+            "pick_connections": lambda: common.pick_connections(
+                self.screen, ["A"], "Titel", "Text", "Los", "go"
+            ),
+        }
+
+    def _dialogs_with_text_entry(self):
+        from vpn_manager.tui import common, credentials_screen
+
+        return {
+            "prompt_text": lambda: common.prompt_text(self.screen, "Titel", "Text", "Feld:"),
+            "prompt_form": lambda: common.prompt_form(
+                self.screen, "Titel", "Text", [("Feld", "")]
+            ),
+            "credentials_edit": lambda: credentials_screen._edit_form(self.screen, "Titel"),
+        }
+
+    def test_every_dialog_registers_esc(self):
+        form = self.snack.GridForm.return_value
+        dialogs = {**self._dialogs_without_text_entry(), **self._dialogs_with_text_entry()}
+
+        for name, call_dialog in dialogs.items():
+            with self.subTest(dialog=name):
+                form.addHotKey.reset_mock()
+                call_dialog()
+                self.assertIn(mock.call("ESC"), form.addHotKey.call_args_list)
+
+    def test_q_is_a_hotkey_only_where_no_text_is_typed(self):
+        """In Eingabefeldern würde "q" als Hotkey das Tippen abfangen."""
+        form = self.snack.GridForm.return_value
+
+        for name, call_dialog in self._dialogs_without_text_entry().items():
+            with self.subTest(dialog=name, expected="q als Hotkey"):
+                form.addHotKey.reset_mock()
+                call_dialog()
+                self.assertIn(mock.call("q"), form.addHotKey.call_args_list)
+                self.assertIn(mock.call("Q"), form.addHotKey.call_args_list)
+
+        for name, call_dialog in self._dialogs_with_text_entry().items():
+            with self.subTest(dialog=name, expected="kein q-Hotkey"):
+                form.addHotKey.reset_mock()
+                call_dialog()
+                self.assertNotIn(mock.call("q"), form.addHotKey.call_args_list)
+
+    def test_text_dialogs_register_esc_and_nothing_else(self):
+        """Nur registrierte Tasten liefert newt als Ergebnis – "q" landet sonst im Feld."""
+        form = self.snack.GridForm.return_value
+
+        for name, call_dialog in self._dialogs_with_text_entry().items():
+            with self.subTest(dialog=name):
+                form.addHotKey.reset_mock()
+                call_dialog()
+                self.assertEqual(form.addHotKey.call_args_list, [mock.call("ESC")])
+
+    def test_typing_q_in_a_name_field_is_kept(self):
+        """Ein Name wie "Quantum" darf den Dialog weder abbrechen noch verstümmelt werden."""
+        from vpn_manager.tui import common
+
+        # Formular endet reglär über den Ok-Button, nicht über einen Hotkey.
+        self.snack.GridForm.return_value.runOnce.return_value = mock.MagicMock(name="ok-button")
+        self.snack.ButtonBar.return_value.buttonPressed.return_value = "ok"
+        self.snack.Entry.return_value.value.return_value = "Quantum QVPN"
+
+        self.assertEqual(
+            common.prompt_text(self.screen, "Neues Profil", "Name?", "Name:"), "Quantum QVPN"
+        )
+
+    def test_q_cancels_like_esc(self):
+        from vpn_manager.tui import common
+
+        self.snack.GridForm.return_value.runOnce.return_value = "q"
+        self.snack.ButtonBar.return_value.buttonPressed.return_value = "yes"
+
+        self.assertFalse(common.confirm(self.screen, "Titel", "wirklich?"))
+        self.assertIsNone(common.choose(self.screen, "Titel", "Text", [("A", 0)]))
+
+    def test_credentials_screen_edit_form_is_cancelled(self):
+        from vpn_manager.tui import credentials_screen
+
+        self.snack.ButtonBar.return_value.buttonPressed.return_value = "save"
+        self.assertIsNone(credentials_screen._edit_form(self.screen, "Titel"))
+
+    def test_credentials_screen_list_is_left(self):
+        from vpn_manager.tui import credentials_screen
+
+        with mock.patch.object(credentials_screen.creds, "load_profiles", return_value={}):
+            credentials_screen.run(self.screen, dry_run=True)
 
 
 class PickConnectionsTests(ScreenTestCase):
